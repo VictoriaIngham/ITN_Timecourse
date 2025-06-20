@@ -1,0 +1,268 @@
+---
+title: "MFUZZ-Wasim"
+author: "Juliane"
+date: "2025-04-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  fig.width=12, fig.height=10, 
+                      dpi = 400,
+                      cache = TRUE,
+  echo = TRUE, warning = FALSE, message = FALSE)
+
+#BiocManager::install("ComplexHeatmap")
+#BiocManager::install("clusterProfiler")
+#BiocManager::install("TCseq")
+#BiocManager::install("monocle")
+#devtools::install_github('cole-trapnell-lab/monocle3')
+#install.packages("circlize")
+#install.packages("NbClust")
+
+library("factoextra")
+library("ClusterGVis")
+library("circlize")
+library("dplyr")
+library("tidyr")
+library("tibble")
+library("TCseq")
+library("monocle")
+library("clusterProfiler")
+library("ComplexHeatmap")
+library("NbClust")
+```
+
+```{r Prep Data}
+
+setwd("C:/DATA/PEOPLE/Wasim/2025 - Mfuzz")
+dat <- read.table("logFC_allComp_vs_Ctrl.txt", h=T, sep="\t")
+dat[dat==0]=NA
+descr <- read.delim("descr.txt", h=T, sep="\t")
+goi <- readLines("goi_sel.txt")
+
+dat <- dat %>% left_join(descr, by="GeneID") %>% 
+  drop_na(Description) %>% 
+  column_to_rownames("Description") %>%
+  dplyr::select(-GeneID)
+
+dat<-na.omit(dat)
+
+datPYR <- dat %>% dplyr::select(PYR_1h, PYR_4h, PYR_8h, PYR_24h, PYR_48h, PYR_72h)
+datCOMB <- dat %>% dplyr::select(Combined_1h, Combined_4h, Combined_8h, Combined_24h, Combined_48h, Combined_72h)
+datCFPR <- dat %>% dplyr::select(CFPR_1h, CFPR_4h, CFPR_8h, CFPR_24h, CFPR_48h, CFPR_72h)
+
+#Mfuzz clustering requires an ExpressionSet type object, 
+#so you need to build such an object first with expressions.
+datPYR_matrix<-data.matrix(datPYR)
+datCOMB_matrix<-data.matrix(datCOMB)
+datCFPR_matrix<-data.matrix(datCFPR)
+
+
+getClusters(datCOMB_matrix) # no real drop off in curve (only plots until k=10)
+getClusters(datPYR_matrix)  # same here
+getClusters(datCFPR_matrix) # same here
+
+## I will test different Ks to see what they look like in the line plots ##
+
+```
+
+## PYRETHROID DATASET
+```{r PYRETHROIDS}
+
+# k=6 is based on the lineplots (see Mfuzz-Test.html)
+cmPYR <- clusterData(datPYR_matrix,
+                  cluster.method = "mfuzz",
+                  seed=784532,
+                  cluster.num = 6)
+
+# plot line only
+visCluster(object = cmPYR,
+           plot.type = "line")
+
+# plot heatmap + lineplot
+pdf('PYR_Mfuzz.pdf',height = 10,width = 12)
+visCluster(object = cmPYR,
+           plot.type = "both",
+           column_names_rot = 45,
+           show_row_dend = F,
+           markGenes = goi,
+           cluster.order = 1:6,
+           markGenes.side = "left",
+           ctAnno.col = ggsci::pal_npg()(6))
+dev.off()
+
+
+```
+
+### extract data tables for Pyrethroids
+```{r }
+# extract gene lists and save them
+geneList1 <- cmPYR$cluster.list
+PYRc1 <- geneList1[["C1"]]
+PYRc2 <- geneList1[["C2"]]
+PYRc3 <- geneList1[["C3"]]
+PYRc4 <- geneList1[["C4"]]
+
+# Extract Identifiers
+extract_ids <- function(list) {
+  gsub("\\).*", "", gsub("\\(", "", list))
+}
+
+PYR_lists <- list(PYRc1, PYRc2, PYRc3, PYRc4)
+names(PYR_lists) <- c("PYRc1", "PYRc2", "PYRc3", "PYRc4")
+
+# Identify overlapping identifiers
+id_counts <- table(unlist(lapply(PYR_lists, extract_ids)))
+overlapping_ids <- names(id_counts[id_counts > 1])
+print("Overlapping Identifiers:")
+print(overlapping_ids)
+
+# Create a data frame with all unique identifiers
+all_ids <- unique(unlist(lapply(PYR_lists, extract_ids)))
+
+# Create a result data frame
+result <- data.frame(GeneID = character(), Lists = character(), stringsAsFactors = FALSE)
+# Assign occurrences
+for (id in all_ids) {
+  found_in <- names(PYR_lists)[sapply(PYR_lists, function(lst) id %in% extract_ids(lst))]
+  result <- rbind(result, data.frame(GeneID = id, Lists = paste(found_in, collapse = ", ")))
+}
+
+resultPYR <- result %>% left_join(descr, by="GeneID")
+
+write.table(resultPYR, "PYR_Clusters.txt", sep="\t", quote = FALSE)
+
+```
+
+
+```{r CHLORPHENAPYR}
+
+# k=5 is based on the lineplots (see Mfuzz-Test.html)
+cmCFPR <- clusterData(datCFPR_matrix,
+                  cluster.method = "mfuzz",
+                  seed=784532,
+                  cluster.num = 5)
+
+# plot line only
+visCluster(object = cmCFPR,
+           plot.type = "line")
+
+# plot heatmap + lineplot
+pdf('CFPR_Mfuzz.pdf',height = 10,width = 12)
+visCluster(object = cmCFPR,
+           plot.type = "both",
+           column_names_rot = 45,
+           show_row_dend = F,
+           markGenes = goi,
+           cluster.order = 1:5,
+           markGenes.side = "left",
+           ctAnno.col = ggsci::pal_npg()(5))
+dev.off()
+
+```
+
+###extract data table
+```{r }
+# extract gene lists and save them
+geneList1 <- cmPYR$cluster.list
+CFPRc1 <- geneList1[["C1"]]
+CFPRc2 <- geneList1[["C2"]]
+CFPRc3 <- geneList1[["C3"]]
+CFPRc4 <- geneList1[["C4"]]
+
+# Extract Identifiers
+extract_ids <- function(list) {
+  gsub("\\).*", "", gsub("\\(", "", list))
+}
+
+CFPR_lists <- list(CFPRc1, CFPRc2, CFPRc3, CFPRc4)
+names(CFPR_lists) <- c("CFPRc1", "CFPRc2", "CFPRc3", "CFPRc4")
+
+# Identify overlapping identifiers
+id_counts <- table(unlist(lapply(CFPR_lists, extract_ids)))
+overlapping_ids <- names(id_counts[id_counts > 1])
+print("Overlapping Identifiers:")
+print(overlapping_ids)
+
+# Create a data frame with all unique identifiers
+all_ids <- unique(unlist(lapply(CFPR_lists, extract_ids)))
+
+# Create a result data frame
+result <- data.frame(GeneID = character(), Lists = character(), stringsAsFactors = FALSE)
+# Assign occurrences
+for (id in all_ids) {
+  found_in <- names(CFPR_lists)[sapply(CFPR_lists, function(lst) id %in% extract_ids(lst))]
+  result <- rbind(result, data.frame(GeneID = id, Lists = paste(found_in, collapse = ", ")))
+}
+
+resultCFPR <- result %>% left_join(descr, by="GeneID")
+
+write.table(resultCFPR, "CFPR_Clusters.txt", sep="\t", quote = FALSE)
+
+```
+
+```{r COMBINED}
+
+# k=5 is based on the lineplots (see Mfuzz-Test.html)
+cmCOMB <- clusterData(datCOMB_matrix,
+                  cluster.method = "mfuzz",
+                  seed=784532,
+                  cluster.num = 5)
+
+# plot line only
+visCluster(object = cmCOMB,
+           plot.type = "line")
+
+# plot heatmap + lineplot
+pdf('COMB_Mfuzz.pdf',height = 10,width = 12)
+visCluster(object = cmCOMB,
+           plot.type = "both",
+           column_names_rot = 45,
+           show_row_dend = F,
+           markGenes = goi,
+           cluster.order = 1:5,
+           markGenes.side = "left",
+           ctAnno.col = ggsci::pal_npg()(5))
+dev.off()
+```
+
+###extract data table
+```{r }
+# extract gene lists and save them
+geneList1 <- cmPYR$cluster.list
+COMBc1 <- geneList1[["C1"]]
+COMBc2 <- geneList1[["C2"]]
+COMBc3 <- geneList1[["C3"]]
+COMBc4 <- geneList1[["C4"]]
+
+# Extract Identifiers
+extract_ids <- function(list) {
+  gsub("\\).*", "", gsub("\\(", "", list))
+}
+
+COMB_lists <- list(COMBc1, COMBc2, COMBc3, COMBc4)
+names(COMB_lists) <- c("COMBc1", "COMBc2", "COMBc3", "COMBc4")
+
+# Identify overlapping identifiers
+id_counts <- table(unlist(lapply(COMB_lists, extract_ids)))
+overlapping_ids <- names(id_counts[id_counts > 1])
+print("Overlapping Identifiers:")
+print(overlapping_ids)
+
+# Create a data frame with all unique identifiers
+all_ids <- unique(unlist(lapply(COMB_lists, extract_ids)))
+
+# Create a result data frame
+result <- data.frame(GeneID = character(), Lists = character(), stringsAsFactors = FALSE)
+# Assign occurrences
+for (id in all_ids) {
+  found_in <- names(COMB_lists)[sapply(COMB_lists, function(lst) id %in% extract_ids(lst))]
+  result <- rbind(result, data.frame(GeneID = id, Lists = paste(found_in, collapse = ", ")))
+}
+
+resultCOMB <- result %>% left_join(descr, by="GeneID")
+
+write.table(resultCOMB, "COMB_Clusters.txt", sep="\t", quote = FALSE)
+
+```
